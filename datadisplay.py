@@ -1,6 +1,8 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox, QPlainTextEdit
 import random
 from PyQt5.QtCore import QTimer, QDateTime
+from telemetry import TelemetryReceiver
+import serial
 
 class LiveDataWidget(QWidget):
     def __init__(self):
@@ -11,8 +13,12 @@ class LiveDataWidget(QWidget):
 
         # Create a QTimer to update data every second
         self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_data)
+        self.timer.timeout.connect(self.simulate_data)
         self.timer.start(1000)  # Update every second
+        
+        # To connect to the telemetry receiver
+        self._ser = serial.Serial("/dev/ttyUSB2", 57600, timeout=0.1) #IDK WHAT THIS SERIAL NEEDS TO BEs
+        self._receiver = TelemetryReceiver(self._ser.fileno())
 
         # Create the outermost groupbox to wrap all sections
         self.main_group = QGroupBox("Live Data", self)
@@ -129,8 +135,39 @@ class LiveDataWidget(QWidget):
         radio_layout.addWidget(self.radio_time_label)
 
         self.radio_group.setLayout(radio_layout)
+        
+    def update_data(self, data):
+        try:
+            pkt = self._receiver.read()
+        except IOError:
+            return  # no packet this cycle
 
-    def update_data(self):
+        # update IMU labels
+        att = pkt.roll, pkt.pitch, pkt.yaw
+        self.imu_roll_label.setText(f"Roll: {att[0]:.2f}°")
+        self.imu_pitch_label.setText(f"Pitch: {att[1]:.2f}°")
+        self.imu_yaw_label.setText(f"Yaw: {att[2]:.2f}°")
+
+        # update acceleration
+        ax, ay, az = pkt.accelX, pkt.accelY, pkt.accelZ
+        self.imu_accel_label.setText(
+            f"Acceleration (XYZ): ({ax:.2f}, {ay:.2f}, {az:.2f}) m/s²"
+        )
+
+        # update barometer altitude
+        self.barometer_altitude_label.setText(
+            f"Altitude: {pkt.altitude:.2f} m"
+        )
+
+        # append stage to terminal
+        from PyQt5.QtCore import QDateTime
+        ts = QDateTime.fromSecsSinceEpoch(int(pkt.timestamp)).toString("HH:mm:ss")
+        self.lora_terminal.appendPlainText(f"[{ts}] Stage: {pkt.stage.name}")
+        
+        # the radio signal was not part of the original packet, nor was the secondary IMU. 
+        # TODO: secondary IMU and radio signal
+
+    def simulate_data(self):        
         # Simulating live data values
         
         if random.random() < 0.3:
